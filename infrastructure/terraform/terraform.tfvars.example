@@ -1,0 +1,37 @@
+# =============================================================================
+# Terraform Variables Example
+# =============================================================================
+# Copy this file to terraform.tfvars and customize for your environment
+# NEVER commit terraform.tfvars to version control!
+# =============================================================================
+
+# General Settings
+project_name = "etl-pipeline"
+environment  = "dev"
+aws_region   = "us-east-1"
+
+# S3 Settings
+force_destroy_buckets        = true   # Set to false in production
+raw_data_retention_days      = 30
+processed_data_retention_days = 90
+
+# DynamoDB Settings (Free Tier: 25 RCU, 25 WCU)
+dynamodb_read_capacity  = 5
+dynamodb_write_capacity = 5
+
+# Lambda Settings
+lambda_runtime = "python3.9"
+lambda_memory  = 256    # MB
+lambda_timeout = 300    # seconds
+
+# Logging
+log_level          = "INFO"
+log_retention_days = 7
+
+# Scheduling (disabled by default to save costs)
+enable_schedule     = false
+schedule_expression = "rate(1 hour)"
+
+# Notifications
+notification_email = ""  # Set your email to receive alerts
+error_threshold    = 3

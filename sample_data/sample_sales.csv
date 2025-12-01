@@ -1,0 +1,21 @@
+order_id,customer_id,product_name,quantity,unit_price,order_date,shipping_address,status
+ORD001,CUST001,Laptop Pro 15,1,1299.99,2024-01-15,123 Main St New York NY,completed
+ORD002,CUST002,Wireless Mouse,2,29.99,2024-01-15,456 Oak Ave Los Angeles CA,completed
+ORD003,CUST001,USB-C Hub,1,49.99,2024-01-16,123 Main St New York NY,completed
+ORD004,CUST003,Mechanical Keyboard,1,149.99,2024-01-16,789 Pine Rd Chicago IL,shipped
+ORD005,CUST004,Monitor 27 inch,1,399.99,2024-01-17,321 Elm St Houston TX,processing
+ORD006,CUST002,Webcam HD,1,79.99,2024-01-17,456 Oak Ave Los Angeles CA,completed
+ORD007,CUST005,External SSD 1TB,2,129.99,2024-01-18,654 Maple Dr Phoenix AZ,completed
+ORD008,CUST003,Laptop Stand,1,59.99,2024-01-18,789 Pine Rd Chicago IL,shipped
+ORD009,CUST006,Wireless Headphones,1,199.99,2024-01-19,987 Cedar Ln Philadelphia PA,completed
+ORD010,CUST001,Screen Protector,3,14.99,2024-01-19,123 Main St New York NY,completed
+ORD011,CUST007,Tablet 10 inch,1,449.99,2024-01-20,147 Birch Way San Antonio TX,processing
+ORD012,CUST004,Phone Case,2,24.99,2024-01-20,321 Elm St Houston TX,completed
+ORD013,CUST008,Smart Watch,1,299.99,2024-01-21,258 Spruce Ave San Diego CA,shipped
+ORD014,CUST002,Charging Cable,5,9.99,2024-01-21,456 Oak Ave Los Angeles CA,completed
+ORD015,CUST009,Bluetooth Speaker,1,89.99,2024-01-22,369 Willow St Dallas TX,completed
+ORD016,CUST005,Power Bank,2,39.99,2024-01-22,654 Maple Dr Phoenix AZ,shipped
+ORD017,CUST010,Graphics Card,1,599.99,2024-01-23,741 Ash Blvd San Jose CA,processing
+ORD018,CUST003,RAM 16GB,2,79.99,2024-01-23,789 Pine Rd Chicago IL,completed
+ORD019,CUST006,Cooling Pad,1,34.99,2024-01-24,987 Cedar Ln Philadelphia PA,completed
+ORD020,CUST001,Desk Lamp LED,1,44.99,2024-01-24,123 Main St New York NY,shipped

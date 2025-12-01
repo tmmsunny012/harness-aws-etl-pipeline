@@ -1,0 +1,25 @@
+# AWS Configuration Template
+# ==========================
+# Copy this file to aws_config.env and fill in your credentials
+# NEVER commit aws_config.env to version control!
+
+# AWS Credentials
+AWS_ACCESS_KEY_ID=your_access_key_here
+AWS_SECRET_ACCESS_KEY=your_secret_key_here
+AWS_DEFAULT_REGION=us-east-1
+
+# Optional: If using assumed role
+# AWS_ROLE_ARN=arn:aws:iam::123456789012:role/your-role
+
+# Optional: Session token for temporary credentials
+# AWS_SESSION_TOKEN=your_session_token_here
+
+# Environment (local, dev, staging, prod)
+ENVIRONMENT=dev
+
+# Project-specific
+PROJECT_NAME=etl-pipeline
+RESOURCE_PREFIX=etl
+
+# Optional: Email for SNS notifications
+# NOTIFICATION_EMAIL=your-email@example.com

@@ -1,0 +1,4 @@
+{
+  "source_bucket": "etl-raw-data-local",
+  "source_key": "sample/sample_sales.csv"
+}

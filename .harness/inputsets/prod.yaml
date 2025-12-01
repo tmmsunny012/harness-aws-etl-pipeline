@@ -1,0 +1,21 @@
+# =============================================================================
+# Harness Input Set - Production Environment
+# =============================================================================
+
+inputSet:
+  name: Prod Environment
+  identifier: prod_environment
+  orgIdentifier: ${HARNESS_ORG_ID}
+  projectIdentifier: ${HARNESS_PROJECT_ID}
+  pipeline:
+    identifier: etl_pipeline_deployment
+    variables:
+      - name: environment
+        type: String
+        value: prod
+      - name: aws_region
+        type: String
+        value: us-east-1
+      - name: auto_approve
+        type: String
+        value: "false"  # Require approval for prod

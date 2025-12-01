@@ -1,0 +1,203 @@
+# =============================================================================
+# Harness LOCAL DEVELOPMENT Pipeline
+# =============================================================================
+# A simplified pipeline for local development and testing.
+# Runs entirely on your LOCAL DELEGATE (Docker) - NO cloud costs!
+#
+# Features:
+# - Quick feedback loop
+# - Tests against LocalStack (no AWS charges)
+# - Optional AWS deployment
+# =============================================================================
+
+pipeline:
+  name: Local Development Pipeline
+  identifier: local_dev_pipeline
+  projectIdentifier: ${HARNESS_PROJECT_ID}
+  orgIdentifier: ${HARNESS_ORG_ID}
+  description: Fast local development pipeline using Docker delegate
+  tags:
+    project: etl-pipeline
+    type: local-dev
+
+  # ---------------------------------------------------------------------------
+  # Variables
+  # ---------------------------------------------------------------------------
+  variables:
+    - name: run_mode
+      type: String
+      default: test_only
+      description: "Mode: 'test_only', 'test_and_build', or 'full_deploy'"
+
+    - name: use_localstack
+      type: String
+      default: "true"
+      description: Use LocalStack for testing (no AWS charges)
+
+  # ---------------------------------------------------------------------------
+  # Stages
+  # ---------------------------------------------------------------------------
+  stages:
+    # =========================================================================
+    # STAGE 1: LOCAL TEST
+    # =========================================================================
+    - stage:
+        name: Local Test
+        identifier: local_test
+        type: CI
+        description: Run tests locally
+        spec:
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Docker  # Always use local delegate
+            spec: {}
+
+          execution:
+            steps:
+              # ---------------------------------------------------------------
+              # Quick Test
+              # ---------------------------------------------------------------
+              - step:
+                  type: Run
+                  name: Run Tests
+                  identifier: run_tests
+                  spec:
+                    connectorRef: account.harnessImage
+                    image: python:3.9-slim
+                    shell: Sh
+                    command: |
+                      echo "============================================"
+                      echo "  LOCAL DEVELOPMENT - Quick Test"
+                      echo "============================================"
+
+                      # Install
+                      pip install -r requirements.txt -q
+
+                      # Set test environment
+                      export ENVIRONMENT=test
+                      export AWS_ACCESS_KEY_ID=test
+                      export AWS_SECRET_ACCESS_KEY=test
+                      export AWS_DEFAULT_REGION=us-east-1
+
+                      # LocalStack mode
+                      if [ "<+pipeline.variables.use_localstack>" = "true" ]; then
+                        export AWS_ENDPOINT_URL=http://host.docker.internal:4566
+                        echo "Using LocalStack at $AWS_ENDPOINT_URL"
+                      fi
+
+                      # Run unit tests
+                      echo ""
+                      echo "Running unit tests..."
+                      python -m pytest tests/unit/ -v --tb=short -q
+
+                      echo ""
+                      echo "All tests passed!"
+
+    # =========================================================================
+    # STAGE 2: BUILD (Optional)
+    # =========================================================================
+    - stage:
+        name: Build Package
+        identifier: build_package
+        type: CI
+        description: Build Lambda package
+        when:
+          stageStatus: Success
+          condition: <+pipeline.variables.run_mode> == "test_and_build" || <+pipeline.variables.run_mode> == "full_deploy"
+        spec:
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Docker
+            spec: {}
+
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: Build Lambda
+                  identifier: build_lambda
+                  spec:
+                    connectorRef: account.harnessImage
+                    image: python:3.9-slim
+                    shell: Sh
+                    command: |
+                      echo "============================================"
+                      echo "  Building Lambda Package"
+                      echo "============================================"
+
+                      mkdir -p build/lambda_package
+
+                      # Install dependencies
+                      pip install -r etl/requirements-lambda.txt -t build/lambda_package/ -q
+
+                      # Copy code
+                      cp -r etl/src/* build/lambda_package/
+                      cp etl/lambda_handler.py build/lambda_package/
+
+                      # Create zip
+                      cd build/lambda_package
+                      zip -r ../lambda_function.zip . -q
+
+                      echo ""
+                      echo "Package created: build/lambda_function.zip"
+                      ls -lh ../lambda_function.zip
+
+    # =========================================================================
+    # STAGE 3: DEPLOY (Optional)
+    # =========================================================================
+    - stage:
+        name: Deploy to AWS
+        identifier: deploy_aws
+        type: CI
+        description: Deploy to AWS (optional)
+        when:
+          stageStatus: Success
+          condition: <+pipeline.variables.run_mode> == "full_deploy"
+        spec:
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Docker
+            spec: {}
+
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: Terraform Deploy
+                  identifier: terraform_deploy
+                  spec:
+                    connectorRef: account.harnessImage
+                    image: hashicorp/terraform:1.6
+                    shell: Sh
+                    command: |
+                      echo "============================================"
+                      echo "  Deploying to AWS"
+                      echo "============================================"
+
+                      cd infrastructure/terraform
+
+                      # Init
+                      terraform init -input=false
+
+                      # Plan & Apply
+                      terraform plan -var="environment=dev" -out=tfplan -input=false
+                      terraform apply -auto-approve tfplan
+
+                      echo ""
+                      echo "============================================"
+                      echo "  Deployment Complete!"
+                      echo "============================================"
+                      terraform output upload_instructions
+                    envVariables:
+                      AWS_ACCESS_KEY_ID: <+secrets.getValue("aws_access_key")>
+                      AWS_SECRET_ACCESS_KEY: <+secrets.getValue("aws_secret_key")>
+                      AWS_DEFAULT_REGION: us-east-1

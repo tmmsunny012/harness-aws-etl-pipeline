@@ -1,0 +1,27 @@
+# =============================================================================
+# Harness Input Set - Local Delegate (Docker)
+# =============================================================================
+# Use this when running pipeline on your LOCAL machine via the Harness delegate.
+# This is FREE - no Harness Cloud build minutes consumed!
+# =============================================================================
+
+inputSet:
+  name: Local Delegate
+  identifier: local_delegate
+  orgIdentifier: ${HARNESS_ORG_ID}
+  projectIdentifier: ${HARNESS_PROJECT_ID}
+  pipeline:
+    identifier: etl_pipeline_deployment
+    variables:
+      - name: environment
+        type: String
+        value: dev
+      - name: aws_region
+        type: String
+        value: us-east-1
+      - name: auto_approve
+        type: String
+        value: "true"
+      - name: runtime_type
+        type: String
+        value: Docker  # <-- Uses your local Docker delegate

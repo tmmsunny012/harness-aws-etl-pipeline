@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  # LocalStack - AWS Cloud Emulation
+  localstack:
+    image: localstack/localstack:latest
+    container_name: etl-localstack
+    ports:
+      - "4566:4566"           # LocalStack Gateway
+      - "4510-4559:4510-4559" # External services
+    environment:
+      - SERVICES=s3,lambda,dynamodb,events,sns,sqs,cloudwatch,logs,iam
+      - DEBUG=1
+      - DATA_DIR=/var/lib/localstack/data
+      - LAMBDA_EXECUTOR=docker
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+    volumes:
+      - "./local/localstack-data:/var/lib/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "./local/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MinIO - S3 Compatible Storage (Alternative to LocalStack S3)
+  minio:
+    image: minio/minio:latest
+    container_name: etl-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - "./local/minio-data:/data"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # DynamoDB Local
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: etl-dynamodb
+    ports:
+      - "8000:8000"
+    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath /data"
+    volumes:
+      - "./local/dynamodb-data:/data"
+
+  # ETL Application Container (for testing)
+  etl-app:
+    build:
+      context: .
+      dockerfile: local/Dockerfile
+    container_name: etl-app
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - ENVIRONMENT=local
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - "./etl:/app/etl"
+      - "./sample_data:/app/sample_data"
+      - "./config:/app/config"
+    depends_on:
+      localstack:
+        condition: service_healthy
+    command: ["python", "-m", "pytest", "tests/", "-v"]
+
+volumes:
+  localstack-data:
+  minio-data:
+  dynamodb-data:
+
+networks:
+  default:
+    name: etl-network

@@ -1,0 +1,123 @@
+# ETL Pipeline Configuration
+# ===========================
+
+project:
+  name: "aws-etl-pipeline"
+  version: "1.0.0"
+  description: "Data Engineering ETL Pipeline on AWS Free Tier"
+
+# Environment-specific settings
+environments:
+  local:
+    aws_endpoint: "http://localhost:4566"
+    use_localstack: true
+    log_level: "DEBUG"
+
+  dev:
+    aws_region: "us-east-1"
+    log_level: "DEBUG"
+
+  staging:
+    aws_region: "us-east-1"
+    log_level: "INFO"
+
+  prod:
+    aws_region: "us-east-1"
+    log_level: "WARNING"
+
+# S3 Configuration
+s3:
+  raw_bucket_prefix: "etl-raw-data"
+  processed_bucket_prefix: "etl-processed-data"
+  archive_bucket_prefix: "etl-archive"
+
+  # Lifecycle rules (days)
+  raw_data_retention: 30
+  processed_data_retention: 90
+  archive_retention: 365
+
+# Lambda Configuration
+lambda:
+  function_name: "etl-processor"
+  runtime: "python3.9"
+  memory_mb: 256
+  timeout_seconds: 300
+
+  # Environment variables for Lambda
+  environment:
+    LOG_LEVEL: "INFO"
+    BATCH_SIZE: "1000"
+
+# DynamoDB Configuration
+dynamodb:
+  table_name: "etl-metadata"
+  read_capacity: 5    # Free tier: 25 RCU
+  write_capacity: 5   # Free tier: 25 WCU
+
+  # Table schema
+  partition_key: "job_id"
+  sort_key: "timestamp"
+
+# EventBridge Configuration
+eventbridge:
+  schedule_expression: "rate(1 hour)"  # or cron(0 * * * ? *)
+  enabled: false  # Disable by default to save costs
+
+# SNS Configuration
+sns:
+  topic_name: "etl-notifications"
+  email_notifications: false  # Set true and add email to enable
+
+# ETL Pipeline Settings
+etl:
+  # Extract settings
+  extract:
+    supported_formats:
+      - "csv"
+      - "json"
+      - "parquet"
+    max_file_size_mb: 100
+
+  # Transform settings
+  transform:
+    null_handling: "drop"  # drop, fill, flag
+    date_format: "%Y-%m-%d"
+    decimal_precision: 2
+
+  # Load settings
+  load:
+    output_format: "parquet"
+    compression: "snappy"
+    partition_by:
+      - "year"
+      - "month"
+
+# Monitoring & Alerts
+monitoring:
+  cloudwatch:
+    log_retention_days: 7  # Minimize costs
+    metric_namespace: "ETL/Pipeline"
+
+  alerts:
+    error_threshold: 3
+    latency_threshold_ms: 30000
+
+# Cost Control Settings
+cost_control:
+  # Auto-shutdown settings
+  auto_shutdown:
+    enabled: false
+    idle_hours: 24
+
+  # Resource limits
+  limits:
+    max_lambda_invocations_per_day: 1000
+    max_s3_storage_gb: 1
+    max_dynamodb_items: 10000
+
+  # Tags for cost tracking
+  tags:
+    Project: "etl-pipeline"
+    Environment: "${ENVIRONMENT}"
+    Owner: "data-team"
+    CostCenter: "free-tier-test"

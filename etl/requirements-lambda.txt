@@ -1,0 +1,8 @@
+# Lambda-specific dependencies (smaller package)
+# NOTE: pandas, numpy, pyarrow are provided by AWS SDK Pandas Layer
+# Layer ARN: arn:aws:lambda:<region>:336392948345:layer:AWSSDKPandas-Python39:28
+# This keeps the deployment package under 250MB limit
+
+# boto3 is included in Lambda runtime, but we can pin version if needed
+pyyaml>=6.0
+aws-lambda-powertools>=2.20.0

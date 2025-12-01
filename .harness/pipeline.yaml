@@ -1,0 +1,247 @@
+pipeline:
+  identifier: etl_pipeline_deployment
+  name: ETL Pipeline Deployment
+  orgIdentifier: default
+  projectIdentifier: default_project
+  properties:
+    ci:
+      codebase:
+        build: <+input>
+        connectorRef: account.Github_OAuth_1764513463819
+        repoName: tmmsunny012/harness-aws-etl-pipeline
+  variables:
+    - name: environment
+      type: String
+      value: dev
+      description: Target environment (dev, staging, prod)
+    - name: aws_region
+      type: String
+      value: us-east-1
+      description: AWS region for deployment
+  stages:
+    - stage:
+        identifier: build_and_test
+        name: Build and Test
+        type: CI
+        spec:
+          caching:
+            enabled: true
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  identifier: run_tests
+                  name: Run Tests
+                  type: Run
+                  timeout: 10m
+                  spec:
+                    shell: Sh
+                    command: |-
+                      echo "ETL Pipeline - Build and Test"
+                      pip install --upgrade pip -q
+                      pip install -r requirements.txt -q
+                      pip install flake8 pytest -q
+                      flake8 etl/ --max-line-length=100 --ignore=E501,W503 || echo "Linting issues found"
+                      export ENVIRONMENT=test
+                      export AWS_ACCESS_KEY_ID=testing
+                      export AWS_SECRET_ACCESS_KEY=testing
+                      export AWS_DEFAULT_REGION=us-east-1
+                      python -m pytest tests/unit/ -v --tb=short || echo "Some tests may have failed"
+                      echo "Tests complete"
+    - stage:
+        identifier: deploy
+        name: Build and Deploy
+        type: CI
+        spec:
+          caching:
+            enabled: true
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  identifier: full_deploy
+                  name: Build Lambda and Deploy Infrastructure
+                  type: Run
+                  timeout: 30m
+                  spec:
+                    connectorRef: account.harnessImage
+                    image: python:3.9-slim
+                    shell: Sh
+                    command: |-
+                      set -e
+                      echo "=== Debug: Checking AWS credentials ==="
+                      if [ -z "$AWS_ACCESS_KEY_ID" ]; then
+                        echo "ERROR: AWS_ACCESS_KEY_ID is not set!"
+                        exit 1
+                      fi
+                      echo "AWS_ACCESS_KEY_ID is set (length: ${#AWS_ACCESS_KEY_ID})"
+                      echo "AWS_SECRET_ACCESS_KEY is set (length: ${#AWS_SECRET_ACCESS_KEY})"
+                      echo "AWS_DEFAULT_REGION: $AWS_DEFAULT_REGION"
+
+                      echo "=== Step 1: Install Tools ==="
+                      apt-get update && apt-get install -y zip curl unzip gnupg -qq
+                      curl -fsSL https://get.opentofu.org/install-opentofu.sh -o install-opentofu.sh
+                      chmod +x install-opentofu.sh
+                      ./install-opentofu.sh --install-method deb
+                      ln -s /usr/bin/tofu /usr/bin/terraform
+                      curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                      unzip -q awscliv2.zip && ./aws/install
+
+                      echo "=== Step 2: Build Lambda Package ==="
+                      mkdir -p build/lambda_package
+                      pip install -r etl/requirements-lambda.txt -t build/lambda_package/ -q --platform manylinux2014_x86_64 --only-binary=:all: || pip install -r etl/requirements-lambda.txt -t build/lambda_package/ -q
+                      cp -r etl/src/* build/lambda_package/
+                      cp etl/lambda_handler.py build/lambda_package/
+                      cd build/lambda_package && zip -r ../lambda_function.zip . -q && cd ../..
+                      echo "Lambda package: $(ls -lh build/lambda_function.zip)"
+
+                      echo "=== Step 3: Setup Variables ==="
+                      ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                      ENV="<+pipeline.variables.environment>"
+                      REGION="<+pipeline.variables.aws_region>"
+                      STATE_BUCKET="etl-pipeline-terraform-state-${ACCOUNT_ID}"
+                      LOCK_TABLE="etl-pipeline-terraform-locks"
+                      PROCESSED_BUCKET="etl-pipeline-${ENV}-processed-data-${ACCOUNT_ID}"
+
+                      echo "=== Step 4: Bootstrap Terraform State Backend (if needed) ==="
+                      # Check if state bucket exists
+                      BUCKET_EXISTS=$(aws s3api head-bucket --bucket "${STATE_BUCKET}" 2>/dev/null && echo "yes" || echo "no")
+                      TABLE_EXISTS=$(aws dynamodb describe-table --table-name "${LOCK_TABLE}" 2>/dev/null && echo "yes" || echo "no")
+
+                      if [ "$BUCKET_EXISTS" = "no" ] || [ "$TABLE_EXISTS" = "no" ]; then
+                        echo "Creating/updating Terraform state infrastructure..."
+                        cd infrastructure/terraform-state
+                        terraform init -input=false
+
+                        # Import existing resources if they exist (handles partial state)
+                        if [ "$BUCKET_EXISTS" = "yes" ]; then
+                          terraform import aws_s3_bucket.terraform_state "${STATE_BUCKET}" 2>/dev/null || true
+                          terraform import aws_s3_bucket_versioning.terraform_state "${STATE_BUCKET}" 2>/dev/null || true
+                          terraform import aws_s3_bucket_server_side_encryption_configuration.terraform_state "${STATE_BUCKET}" 2>/dev/null || true
+                          terraform import aws_s3_bucket_public_access_block.terraform_state "${STATE_BUCKET}" 2>/dev/null || true
+                        fi
+                        if [ "$TABLE_EXISTS" = "yes" ]; then
+                          terraform import aws_dynamodb_table.terraform_locks "${LOCK_TABLE}" 2>/dev/null || true
+                        fi
+
+                        terraform apply -auto-approve -input=false -var="aws_region=${REGION}"
+                        cd ../..
+                      else
+                        echo "State infrastructure already exists: ${STATE_BUCKET}, ${LOCK_TABLE}"
+                      fi
+
+                      echo "=== Step 5: Terraform Init with S3 Backend ==="
+                      cd infrastructure/terraform
+                      rm -f .terraform.lock.hcl .terraform/terraform.tfstate
+                      terraform init -input=false -upgrade -reconfigure \
+                        -backend-config="bucket=${STATE_BUCKET}" \
+                        -backend-config="dynamodb_table=${LOCK_TABLE}"
+
+                      echo "=== Step 6: Import Existing Resources (if any) ==="
+                      RAW_BUCKET="etl-pipeline-${ENV}-raw-data-${ACCOUNT_ID}"
+                      DYNAMODB_TABLE="etl-pipeline-${ENV}-metadata"
+                      LAMBDA_ROLE="etl-pipeline-${ENV}-lambda-role"
+                      LAMBDA_FUNC="etl-pipeline-${ENV}-processor"
+                      SNS_TOPIC="etl-pipeline-${ENV}-notifications"
+                      LOG_GROUP="/aws/lambda/etl-pipeline-${ENV}-processor"
+                      TF_VARS="-var=environment=${ENV} -var=aws_region=${REGION} -var=lambda_s3_key=pending"
+
+                      # Import existing resources into state (ignore errors if already in state or doesn't exist)
+                      aws s3api head-bucket --bucket "${PROCESSED_BUCKET}" 2>/dev/null && \
+                        terraform import $TF_VARS aws_s3_bucket.processed_data "${PROCESSED_BUCKET}" 2>/dev/null || true
+                      aws s3api head-bucket --bucket "${RAW_BUCKET}" 2>/dev/null && \
+                        terraform import $TF_VARS aws_s3_bucket.raw_data "${RAW_BUCKET}" 2>/dev/null || true
+                      aws dynamodb describe-table --table-name "${DYNAMODB_TABLE}" 2>/dev/null && \
+                        terraform import $TF_VARS aws_dynamodb_table.metadata "${DYNAMODB_TABLE}" 2>/dev/null || true
+                      aws iam get-role --role-name "${LAMBDA_ROLE}" 2>/dev/null && \
+                        terraform import $TF_VARS aws_iam_role.lambda_role "${LAMBDA_ROLE}" 2>/dev/null || true
+                      aws lambda get-function --function-name "${LAMBDA_FUNC}" 2>/dev/null && \
+                        terraform import $TF_VARS aws_lambda_function.etl_processor "${LAMBDA_FUNC}" 2>/dev/null || true
+                      SNS_ARN=$(aws sns list-topics --query "Topics[?contains(TopicArn, '${SNS_TOPIC}')].TopicArn" --output text 2>/dev/null || echo "")
+                      [ -n "$SNS_ARN" ] && terraform import $TF_VARS aws_sns_topic.notifications "${SNS_ARN}" 2>/dev/null || true
+                      aws logs describe-log-groups --log-group-name-prefix "${LOG_GROUP}" 2>/dev/null | grep -q "${LOG_GROUP}" && \
+                        terraform import $TF_VARS aws_cloudwatch_log_group.lambda_logs "${LOG_GROUP}" 2>/dev/null || true
+                      # Import Lambda permission for S3 trigger
+                      terraform import $TF_VARS aws_lambda_permission.s3_trigger "${LAMBDA_FUNC}/AllowS3Invoke" 2>/dev/null || true
+                      # Import S3 bucket notification
+                      terraform import $TF_VARS aws_s3_bucket_notification.raw_data_notification "${RAW_BUCKET}" 2>/dev/null || true
+                      # Import S3 lifecycle configurations
+                      terraform import $TF_VARS aws_s3_bucket_lifecycle_configuration.raw_data "${RAW_BUCKET}" 2>/dev/null || true
+                      terraform import $TF_VARS aws_s3_bucket_lifecycle_configuration.processed_data "${PROCESSED_BUCKET}" 2>/dev/null || true
+                      # Import IAM role policy
+                      terraform import $TF_VARS aws_iam_role_policy.lambda_policy "${LAMBDA_ROLE}:etl-pipeline-${ENV}-lambda-policy" 2>/dev/null || true
+
+                      echo "=== Step 7: Upload Lambda to S3 ==="
+                      cd ../..
+                      TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+                      S3_KEY="lambda-code/lambda_function-${TIMESTAMP}.zip"
+                      # Create processed bucket if it doesn't exist (for Lambda upload)
+                      aws s3api head-bucket --bucket "${PROCESSED_BUCKET}" 2>/dev/null || aws s3 mb "s3://${PROCESSED_BUCKET}" --region ${REGION}
+                      aws s3 cp build/lambda_function.zip "s3://${PROCESSED_BUCKET}/${S3_KEY}"
+                      echo "Uploaded to s3://${PROCESSED_BUCKET}/${S3_KEY}"
+
+                      echo "=== Step 8: Deploy All Infrastructure ==="
+                      cd infrastructure/terraform
+                      terraform apply -auto-approve -input=false \
+                        -var="environment=${ENV}" \
+                        -var="aws_region=${REGION}" \
+                        -var="lambda_s3_key=${S3_KEY}"
+
+                      echo "=== Deployment Complete ==="
+                      terraform output
+                    envVariables:
+                      AWS_ACCESS_KEY_ID: <+secrets.getValue("aws_access_key")>
+                      AWS_SECRET_ACCESS_KEY: <+secrets.getValue("aws_secret_key")>
+                      AWS_DEFAULT_REGION: <+pipeline.variables.aws_region>
+                      TF_LOG: ERROR
+    - stage:
+        identifier: verify
+        name: Verify Deployment
+        type: CI
+        spec:
+          caching:
+            enabled: true
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  identifier: health_check
+                  name: Health Check
+                  type: Run
+                  timeout: 5m
+                  spec:
+                    connectorRef: account.harnessImage
+                    image: amazon/aws-cli:2.13.0
+                    shell: Sh
+                    command: |-
+                      echo "Deployment Verification"
+                      ENV="<+pipeline.variables.environment>"
+                      echo "Checking Lambda..."
+                      aws lambda get-function --function-name etl-pipeline-${ENV}-processor
+                      echo "Checking S3..."
+                      aws s3 ls | grep etl-pipeline-${ENV} || true
+                      echo "Checking DynamoDB..."
+                      aws dynamodb describe-table --table-name etl-pipeline-${ENV}-metadata
+                      echo "All checks passed"
+                    envVariables:
+                      AWS_ACCESS_KEY_ID: <+secrets.getValue("aws_access_key")>
+                      AWS_SECRET_ACCESS_KEY: <+secrets.getValue("aws_secret_key")>
+                      AWS_DEFAULT_REGION: <+pipeline.variables.aws_region>

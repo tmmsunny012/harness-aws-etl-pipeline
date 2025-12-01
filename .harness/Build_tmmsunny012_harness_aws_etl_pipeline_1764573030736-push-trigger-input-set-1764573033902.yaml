@@ -1,0 +1,14 @@
+inputSet:
+  name: Build_tmmsunny012_harness_aws_etl_pipeline_1764573030736-push-trigger-input-set
+  identifier: Build_tmmsunny012_harness_aws_etl_pipeline_1764573030736pushtriggerinputset
+  orgIdentifier: default
+  projectIdentifier: default_project
+  pipeline:
+    identifier: Build_tmmsunny012_harness_aws_etl_pipeline_1764573030736
+    properties:
+      ci:
+        codebase:
+          build:
+            type: branch
+            spec:
+              branch: <+trigger.branch>
